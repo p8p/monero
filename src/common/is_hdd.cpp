@@ -40,6 +40,12 @@
   #include <regex>
   #include <memory>
   #include "util.h"
+  #include <boost/range/iterator_range.hpp>
+  #include <boost/spirit/include/qi_char_.hpp>
+  #include <boost/spirit/include/qi_lit.hpp>
+  #include <boost/spirit/include/qi_difference.hpp>
+  #include <boost/spirit/include/qi_klenee.hpp>
+  #include <boost/spirit/include/qi_sequance.hpp>
 #endif
 #include <boost/optional.hpp>
 
@@ -109,14 +115,17 @@ namespace tools
         p_size,
         VOLUME_NAME_NT | FILE_NAME_NORMALIZED
         );
-      std::regex r("^\\\\Device\\\\([^\\\\]+).*$");
-      std::smatch m;
-      if(std::regex_match(p, m, r))
+      namespace qi = boost::spirit::qi;
+      boost::iterator_range<const char> m{};
+      bool success = qi::parse(
+        p.begin(),
+        p.end(),
+        (qi::lit("\\\\Device\\\\") >> *(qi::char_ - "\\\\")),
+        m
+        );
+      if(success and m.begin() != m.end())
       {
-        if(m.size() == 2)
-        {
-          return m[1].str();
-        }
+        return *m;
       }
     }
     return boost::none;
