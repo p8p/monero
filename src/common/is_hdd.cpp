@@ -38,6 +38,8 @@
   #include <windows.h>
   #include <winioctl.h>
   #include <regex>
+  #include <memory>
+  #include "util.h"
 #endif
 #include <boost/optional.hpp>
 
@@ -79,71 +81,63 @@ namespace tools
   }
 #elif defined(_WIN32) and (_WIN32_WINNT >= 0x0601)
   //file path to logical volume
-  bool fp2lv(const char *fp, std::string &result)
+  boost::optional<std::string> fp2lv(const char *fp)
   {
-    HANDLE h = INVALID_HANDLE_VALUE;
-    h = CreateFile(
-      fp,
-      0,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      nullptr,
-      OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
-      nullptr
-      );
+    std::unique_ptr<HANDLE, close_handle> h{
+      CreateFile(
+        fp,
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
+        nullptr
+        )
+    };
     if(h != INVALID_HANDLE_VALUE)
     {
-      char * p;
-      DWORD p_len = GetFinalPathNameByHandleA(
+      DWORD p_size = GetFinalPathNameByHandleA(
         h,
         nullptr,
         0,
         VOLUME_NAME_NT | FILE_NAME_NORMALIZED
         );
-      p = new char[p_len + 1];
+      std::string p(p_size, char{});
       DWORD r_size = GetFinalPathNameByHandleA(
         h,
-        p,
-        p_len + 1,
+        &p[0],
+        p_size,
         VOLUME_NAME_NT | FILE_NAME_NORMALIZED
         );
-      CloseHandle(h);
-      p[p_len] = 0;
       std::regex r("^\\\\Device\\\\([^\\\\]+).*$");
       std::smatch m;
-      std::string i = p;
-      if(std::regex_match(i, m, r))
+      if(std::regex_match(p, m, r))
       {
-        delete[] p;
         if(m.size() == 2)
         {
-          result = m[1].str();
-          return 1;
+          return m[1].str();
         }
       }
-      else
-      {
-        delete[] p;
-      }
     }
-    return 0;
+    return boost::none;
   }
 
   //logical volume to physical volumes
   bool lv2pv(const char *lv, std::vector<std::string> &pvs)
   {
-    HANDLE h = INVALID_HANDLE_VALUE;
     std::string lv_path = "\\\\?\\";
     lv_path += lv;
-    h = CreateFile(
-      lv_path.c_str(),
-      0,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      nullptr,
-      OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL,
-      nullptr
-      );
+    std::unique_ptr<HANDLE, close_handle> h{
+      CreateFile(
+        lv_path.c_str(),
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+        )
+    };
     if(h != INVALID_HANDLE_VALUE)
     {
       VOLUME_DISK_EXTENTS r;
@@ -158,42 +152,44 @@ namespace tools
         &r_size,
         nullptr
         );
-      CloseHandle(h);
       if(success and r_size == sizeof(r))
       {
-        for(uint32_t i = 0; i < r.NumberOfDiskExtents; ++i)
+        std::ostringstream ss;
+        if(r.NumberOfDiskExtents > 0)
         {
-          std::ostringstream ss;
-          ss << "PhysicalDrive" << r.Extents[i].DiskNumber;
+          ss << "PhysicalDrive" << r.Extents[0].DiskNumber;
           pvs.push_back(ss.str());
+          for(uint32_t i = 1; i < r.NumberOfDiskExtents; ++i)
+          {
+            ss.str(std::string{});
+            ss << "PhysicalDrive" << r.Extents[i].DiskNumber;
+            pvs.push_back(ss.str());
+          }
         }
-        return 1;
+        return true;
       }
     }
-    else
-    {
-      CloseHandle(h);
-    }
-    return 0;
+    return false;
   }
 
-  bool win_device_has_seek_penalty(const char *pv, bool &result)
+  boost::optional<bool> win_device_has_seek_penalty(const char *pv)
   {
-    HANDLE h = INVALID_HANDLE_VALUE;
     std::string pv_path = "\\\\?\\";
     pv_path += pv;
-    h = CreateFile(
-      pv_path.c_str(),
-      0,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      nullptr,
-      OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL,
-      nullptr
-      );
+    std::unique_ptr<HANDLE, close_handle> h{
+      CreateFile(
+        pv_path.c_str(),
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+        )
+    };
     if(h != INVALID_HANDLE_VALUE)
     {
-      STORAGE_PROPERTY_QUERY q = {
+      STORAGE_PROPERTY_QUERY q{
         .PropertyId = StorageDeviceSeekPenaltyProperty,
         .QueryType = PropertyStandardQuery
       };
@@ -209,51 +205,40 @@ namespace tools
         &r_size,
         nullptr
         );
-      CloseHandle(h);
       if(success and r_size == sizeof(r))
       {
-        result = r.IncursSeekPenalty;
-        return 1;
+        return r.IncursSeekPenalty;
       }
     }
-    else
-    {
-      CloseHandle(h);
-    }
-    return 0;
+    return boost::none;
   }
 
-  bool is_hdd_win_ioctl(const char *path, bool &result)
+  boost::optional<bool> is_hdd_win_ioctl(const char *path)
   {
-    std::string lv;
-    bool lv_success = fp2lv(path, lv);
-    if(not lv_success)
+    boost::optional<std::string> lv = fp2lv(path);
+    if(not lv)
     {
-      return 0;
+      return boost::none;
     }
     std::vector<std::string> pvs;
-    bool pv_success = lv2pv(lv.c_str(), pvs);
+    bool pv_success = lv2pv(lv.value().c_str(), pvs);
     if(not pv_success)
     {
-      return 0;
+      return boost::none;
     }
-    bool a_result = 0;
-    bool a_success = 0;
-    for(auto &v: pvs)
+    for(const auto &v: pvs)
     {
-      bool q_result;
-      bool q_success = win_device_has_seek_penalty(v.c_str(), q_result);
-      a_success |= q_success;
-      if(q_success)
+      boost::optional<bool> q = win_device_has_seek_penalty(v.c_str());
+      if(not q)
       {
-        a_result |= q_result;
+        return boost::none;
+      }
+      if(q.value())
+      {
+        return true;
       }
     }
-    if(a_success)
-    {
-      result = a_result;
-    }
-    return a_success;
+    return false;
   }
 #endif
   boost::optional<bool> is_hdd(const char *path)
