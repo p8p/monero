@@ -33,16 +33,18 @@
   #include <sys/stat.h>
   #include <sstream>
   #include <sys/sysmacros.h>
+  #include <fstream>
 #elif defined(_WIN32) and (_WIN32_WINNT >= 0x0601)
   #include <windows.h>
   #include <winioctl.h>
   #include <regex>
 #endif
+#include <boost/optional.hpp>
 
 namespace tools
 {
 #if defined(__GLIBC__)
-  bool is_hdd_sysfs(const char *file_path, bool &result)
+  boost::optional<bool> is_hdd_sysfs(const char *file_path)
   {
     struct stat st;
     std::string prefix;
@@ -54,28 +56,26 @@ namespace tools
     }
     else
     {
-      return 0;
+      return boost::none;
     }
     std::string attr_path = prefix + "/queue/rotational";
-    FILE *f = fopen(attr_path.c_str(), "r");
-    if(f == nullptr)
+    std::ifstream f(attr_path, std::ios_base::in);
+    if(not f.is_open())
     {
       attr_path = prefix + "/../queue/rotational";
-      f = fopen(attr_path.c_str(), "r");
-      if(f == nullptr)
+      f.open(attr_path, std::ios_base::in);
+      if(not f.is_open())
       {
-        return 0;
+          return boost::none;
       }
     }
     unsigned short val = 0xdead;
-    int r = fscanf(f, "%hu", &val);
-    fclose(f);
-    if(r == 1)
+    f >> val;
+    if(not f.fail())
     {
-      result = (val == 1);
-      return 1;
+      return (val == 1);
     }
-    return 0;
+    return boost::none;
   }
 #elif defined(_WIN32) and (_WIN32_WINNT >= 0x0601)
   //file path to logical volume
@@ -256,27 +256,14 @@ namespace tools
     return a_success;
   }
 #endif
-  bool is_hdd(const char *path, bool &result)
+  boost::optional<bool> is_hdd(const char *path)
   {
     #if defined(_WIN32) and (_WIN32_WINNT >= 0x0601)
-    return is_hdd_win_ioctl(path, result);
+    return is_hdd_win_ioctl(path);
     #elif defined(__GLIBC__)
-    return is_hdd_sysfs(path, result);
+    return is_hdd_sysfs(path);
     #else
-    return 0;
+    return boost::none;
     #endif
-  }
-
-  bool is_hdd(const char *path)
-  {
-    bool result;
-    if(is_hdd(path, result))
-    {
-      return result;
-    }
-    else
-    {
-      return 0;
-    }
   }
 }

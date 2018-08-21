@@ -34,9 +34,8 @@
 #if defined(__GLIBC__)
 TEST(is_hdd, linux_os_root)
 {
-  bool result;
   std::string path = "/";
-  EXPECT_TRUE(tools::is_hdd(path.c_str(), result));
+  EXPECT_TRUE(tools::is_hdd(path.c_str()));
 }
 #elif defined(_WIN32) and (_WIN32_WINNT >= 0x0601)
 TEST(is_hdd, win_os_c)
