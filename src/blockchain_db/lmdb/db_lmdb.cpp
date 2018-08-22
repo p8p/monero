@@ -1201,7 +1201,8 @@ void BlockchainLMDB::open(const std::string& filename, const int db_flags)
     throw DB_ERROR("Database could not be opened");
   }
 
-  if (tools::is_hdd(filename.c_str()))
+  boost::optional<bool> q = tools::is_hdd(filename.c_str());
+  if (q and q.value())
     MCLOG_RED(el::Level::Warning, "global", "The blockchain is on a rotating drive: this will be very slow, use a SSD if possible");
 
   m_folder = filename;
