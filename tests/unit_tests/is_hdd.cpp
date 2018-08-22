@@ -40,19 +40,28 @@ TEST(is_hdd, linux_os_root)
 #elif defined(_WIN32) and (_WIN32_WINNT >= 0x0601)
 TEST(is_hdd, win_os_c)
 {
-  bool result;
   std::string path = "\\\\?\\C:\\Windows\\System32\\cmd.exe";
-  EXPECT_TRUE(tools::is_hdd(path.c_str(), result));
+  EXPECT_TRUE(tools::is_hdd(path.c_str()));
   path = "\\\\?\\C:\\";
-  EXPECT_TRUE(tools::is_hdd(path.c_str(), result));
+  EXPECT_TRUE(tools::is_hdd(path.c_str()));
   path = "C:\\";
-  EXPECT_TRUE(tools::is_hdd(path.c_str(), result));
+  EXPECT_TRUE(tools::is_hdd(path.c_str()));
+}
+TEST(is_hdd, win_os_ssd)
+{
+  std::string path = "C:\\test_ssd\\";
+  auto r = tools::is_hdd(path.c_str());
+  EXPECT_TRUE(r);
+  EXPECT_FALSE(r.value());
+  path = "C:\\test_ssd\\test.txt";
+  r = tools::is_hdd(path.c_str());
+  EXPECT_TRUE(r);
+  EXPECT_FALSE(r.value());
 }
 #else
 TEST(is_hdd, unknown_os)
 {
-  bool result;
   std::string path = "";
-  EXPECT_FALSE(tools::is_hdd(path.c_str(), result));
+  EXPECT_FALSE(tools::is_hdd(path.c_str()));
 }
 #endif

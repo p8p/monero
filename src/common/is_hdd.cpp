@@ -37,18 +37,15 @@
 #elif defined(_WIN32) and (_WIN32_WINNT >= 0x0601)
   #include <windows.h>
   #include <winioctl.h>
-  #include <regex>
-  #include <memory>
-  #include "util.h"
   #include <boost/range/iterator_range.hpp>
+  #include <boost/spirit/include/qi_raw.hpp>
   #include <boost/spirit/include/qi_char_.hpp>
   #include <boost/spirit/include/qi_lit.hpp>
   #include <boost/spirit/include/qi_difference.hpp>
-  #include <boost/spirit/include/qi_klenee.hpp>
-  #include <boost/spirit/include/qi_sequance.hpp>
+  #include <boost/spirit/include/qi_kleene.hpp>
+  #include <boost/spirit/include/qi_sequence.hpp>
 #endif
 #include <boost/optional.hpp>
-
 namespace tools
 {
 #if defined(__GLIBC__)
@@ -86,20 +83,28 @@ namespace tools
     return boost::none;
   }
 #elif defined(_WIN32) and (_WIN32_WINNT >= 0x0601)
+
+  struct close_handle
+  {
+    void operator()(HANDLE handle) const noexcept
+    {
+      CloseHandle(handle);
+    }
+  };
   //file path to logical volume
   boost::optional<std::string> fp2lv(const char *fp)
   {
-    std::unique_ptr<HANDLE, close_handle> h{
-      CreateFile(
-        fp,
-        0,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
-        nullptr
-        )
-    };
+    std::unique_ptr<void, close_handle> h_ptr;
+    HANDLE h = CreateFile(
+      fp,
+      0,
+      FILE_SHARE_READ | FILE_SHARE_WRITE,
+      nullptr,
+      OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
+      nullptr
+      );
+    h_ptr.reset(h);
     if(h != INVALID_HANDLE_VALUE)
     {
       DWORD p_size = GetFinalPathNameByHandleA(
@@ -112,20 +117,20 @@ namespace tools
       DWORD r_size = GetFinalPathNameByHandleA(
         h,
         &p[0],
-        p_size,
+        p_size + 1,
         VOLUME_NAME_NT | FILE_NAME_NORMALIZED
         );
       namespace qi = boost::spirit::qi;
-      boost::iterator_range<const char> m{};
+      boost::iterator_range<std::string::const_iterator> m{};
       bool success = qi::parse(
-        p.begin(),
-        p.end(),
-        (qi::lit("\\\\Device\\\\") >> *(qi::char_ - "\\\\")),
+        p.cbegin(),
+        p.cend(),
+        (qi::lit("\\Device\\") >> qi::raw[*(qi::char_ - "\\")]),
         m
         );
-      if(success and m.begin() != m.end())
+      if(success and not m.empty())
       {
-        return *m;
+        return std::string(m.begin(), m.end());
       }
     }
     return boost::none;
@@ -136,17 +141,17 @@ namespace tools
   {
     std::string lv_path = "\\\\?\\";
     lv_path += lv;
-    std::unique_ptr<HANDLE, close_handle> h{
-      CreateFile(
-        lv_path.c_str(),
-        0,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr
-        )
-    };
+    std::unique_ptr<void, close_handle> h_ptr;
+    HANDLE h = CreateFile(
+      lv_path.c_str(),
+      0,
+      FILE_SHARE_READ | FILE_SHARE_WRITE,
+      nullptr,
+      OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL,
+      nullptr
+      );
+    h_ptr.reset(h);
     if(h != INVALID_HANDLE_VALUE)
     {
       VOLUME_DISK_EXTENTS r;
@@ -185,17 +190,17 @@ namespace tools
   {
     std::string pv_path = "\\\\?\\";
     pv_path += pv;
-    std::unique_ptr<HANDLE, close_handle> h{
-      CreateFile(
-        pv_path.c_str(),
-        0,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr
-        )
-    };
+    std::unique_ptr<void, close_handle> h_ptr;
+    HANDLE h = CreateFile(
+      pv_path.c_str(),
+      0,
+      FILE_SHARE_READ | FILE_SHARE_WRITE,
+      nullptr,
+      OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL,
+      nullptr
+      );
+    h_ptr.reset(h);
     if(h != INVALID_HANDLE_VALUE)
     {
       STORAGE_PROPERTY_QUERY q{
